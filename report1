@@ -1,0 +1,139 @@
+# Cyber Security Internship — Elevate Labs
+## Task 1: Scan Your Local Network for Open Ports
+
+**Intern:** 
+**Date:** August 27, 2026
+
+---
+
+## 🎯 Objective
+Discover open ports on devices in the local network using Nmap, and analyze the resulting traffic using Wireshark to understand network exposure.
+
+## 🛠 Tools Used
+- **Nmap**  — port scanning
+- **Wireshark** — packet capture & analysis
+- **Windows CMD** — network configuration (`ipconfig`)
+
+---
+
+## Step 1: Identify Local IP Range
+
+Used `ipconfig` to find the local IPv4 address and subnet.
+
+![ipconfig output](sceenshots/1000067637.jpg)
+
+- **IPv4 Address:** `192.168.0.155`
+- **Subnet Mask:** `255.255.255.0`
+- **Default Gateway:** `192.168.0.1`
+- **Local network range used for scanning:** `192.168.1.0/24`
+
+---
+
+## Step 2: Run Nmap Intense Scan
+
+Command used:
+```
+nmap -p 1-65535 -T4 -A -v 192.168.1.0/24
+```
+
+Scan started — NSE scripts loaded, ping scan initiated across 256 hosts:
+
+![Nmap intense scan start](sceenshots/1000067645.jpg)
+
+While the scan was running, live SYN stealth scan progress was visible:
+
+![Nmap scan running](sceenshots/1000067649.jpg)
+
+### Open Ports Discovered
+
+| Host | Port | Service |
+|---|---|---|
+| 192.168.1.1 | 443/tcp | HTTPS |
+| 192.168.1.2 | 80/tcp | HTTP |
+| 192.168.1.2 | 554/tcp | RTSP |
+| 192.168.1.5 | 45485/tcp | Unknown |
+| 192.168.1.12 | 80/tcp | HTTP |
+| 192.168.1.12 | 443/tcp | HTTPS |
+| 192.168.1.150 | 80/tcp | HTTP |
+| 192.168.1.150 | 554/tcp | RTSP |
+
+![Nmap scan results](sceenshots/1000067635.jpg)
+
+**Note:** Most hosts in the range showed `[host down]` since only a few devices were active on the network at scan time.
+
+### Common Mistake (Debugged Myself)
+Initially tried scanning specific ports directly by name (`22,80,443`) instead of an IP/range, which caused a DNS resolution failure:
+```
+nmap -p 1-65535 -T4 -A -v 22,80,443
+Error resolving 22,80,443: N
+Failed to resolve "22,80,443"
+```
+
+**Fix:** Corrected the target to a proper IP/CIDR range (`192.168.1.0/24`) instead of a port list.
+
+---
+
+## Step 3: Analyze Capture with Wireshark
+
+Captured live traffic during scanning/browsing on the `Wi-Fi` interface.
+
+**Full capture** — 14,785 packets total, showing TLS Application Data, TCP ACKs, and Ignored Unknown Records:
+
+![Wireshark full capture](sceenshots/1000067631.jpg)
+
+**ARP & ICMPv6 activity** observed near the end of the capture (device resolving MAC address, IPv6 neighbor discovery):
+
+![Wireshark ARP/ICMPv6](sceenshots/1000067641.jpg)
+
+**Filtered by specific MAC pair** using display filter:
+```
+eth.addr eq 56:4d:41:b0:f3:6e and eth.addr eq a8:41:f4:94:1b:59
+```
+This isolates traffic between the local NIC and the gateway (AzureWaveTec device), showing a TLS 1.2 session with reassembled TCP PDUs.
+
+![Wireshark filtered stream](sceenshots/1000067633.jpg)
+
+**Following one full TCP stream** using filter:
+```
+tcp.stream eq 0
+```
+This shows the complete lifecycle of one TLS 1.2 connection — handshake, application data exchange, and clean termination via FIN/ACK packets.
+
+![Wireshark TCP stream](sceenshots/1000067643.jpg)
+
+---
+
+## 🔍 Observations
+- Local network had very few active hosts; most addresses in `192.168.1.0/24` returned `[host down]`.
+- Open HTTP/HTTPS ports (80/443) found on router and IoT-like devices (192.168.1.2, 192.168.1.150) — likely a camera/media device given port **554 (RTSP)**.
+- An unusual **port 45485** open on `192.168.1.5` — worth further investigation as it's a non-standard high port.
+- Wireshark confirmed all sampled traffic was encrypted (TLS 1.2/1.3), so payload content itself wasn't exposed, but metadata (IPs, ports, timing) was fully visible.
+
+## ⚠️ Potential Security Risks Identified
+- Open RTSP (554) suggests a camera/streaming device — if unauthenticated, this could leak live video feeds.
+- Unknown high port (45485) open on a host could indicate a custom service, backdoor, or misconfigured application — should be identified and closed/firewalled if unnecessary.
+- Router admin interface (443 on gateway) should be checked for default credentials.
+
+## ✅ Recommendations
+- Close/firewall unused ports (especially the unidentified 45485).
+- Restrict RTSP camera streams behind authentication and VPN access only.
+- Change default admin credentials on router/IoT devices.
+- Regularly re-scan the network to catch newly exposed services.
+
+---
+
+## 📚 Interview Questions — Quick Answers
+
+1. **What is an open port?** A port actively listening for incoming connections on a device, allowing a service to communicate over the network.
+2. **How does Nmap perform a TCP SYN scan?** It sends a SYN packet to a port; a SYN-ACK reply means open, RST means closed, and no reply (filtered) suggests a firewall — without completing the full TCP handshake, making it fast and stealthy.
+3. **What risks are associated with open ports?** Unauthorized access, exploitation of vulnerable services, data leakage, and use as an entry point for malware/attacks.
+4. **TCP vs UDP scanning:** TCP scanning uses the connection-oriented handshake (SYN/ACK) for reliable port-state detection; UDP scanning is connectionless and slower/less reliable since there's no handshake — relies on ICMP unreachable responses to infer closed ports.
+5. **How can open ports be secured?** Close unused ports, use firewalls, apply the principle of least privilege, keep services patched, and use VPNs/authentication for necessary open services.
+6. **Firewall's role regarding ports?** It filters and controls inbound/outbound traffic on specific ports, blocking unauthorized or unnecessary access while allowing legitimate traffic.
+7. **What is a port scan and why do attackers perform it?** A technique to probe a range of ports on a host to find open, closed, or filtered ports — attackers use it for reconnaissance to identify exploitable services before an attack.
+8. **How does Wireshark complement port scanning?** While Nmap identifies which ports are open, Wireshark captures and inspects the actual packets/traffic flowing through those ports, revealing protocols, handshake behavior, and potential anomalies in real time.
+
+---
+
+## 🏁 Outcome
+Gained hands-on experience in basic network reconnaissance — identifying live hosts, discovering open ports/services via Nmap, and validating/analyzing traffic behavior using Wireshark to understand real network exposure.
